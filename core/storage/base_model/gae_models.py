@@ -24,7 +24,7 @@ from core import feconf
 from core import utils
 from core.constants import constants
 from core.platform import models
-
+from datetime import timezone
 from typing import Final, Literal, TypedDict
 
 from typing import ( # isort:skip
@@ -150,6 +150,15 @@ class ModelsToPutDict(TypedDict, total=False):
     snapshot_content_model: BaseSnapshotContentModel
     commit_log_model: BaseCommitLogEntryModel
 
+def get_current_datetime_utc() -> datetime.datetime:
+    """Creates a timezone-naive UTC timestamp for use with DateTimeProperty.
+    Returns a datetime object representing current UTC time. While the timestamp
+    is created with timezone awareness, the timezone info is stripped before
+    returning since DateTimeProperty expects naive datetimes.
+    Returns:
+        datetime.datetime: Current UTC time as a naive datetime.
+    """
+    return datetime.datetime.now(timezone.utc).replace(tzinfo=None)
 
 class BaseModel(datastore_services.Model):
     """Base model for all persistent object storage classes."""
@@ -185,10 +194,10 @@ class BaseModel(datastore_services.Model):
         super()._pre_put_hook()
 
         if self.created_on is None:
-            self.created_on = datetime.datetime.utcnow()
+            self.created_on = get_current_datetime_utc()
 
         if self.last_updated is None:
-            self.last_updated = datetime.datetime.utcnow()
+            self.last_updated = get_current_datetime_utc()
             self._last_updated_timestamp_is_fresh = True
 
         if not self._last_updated_timestamp_is_fresh:
@@ -201,7 +210,22 @@ class BaseModel(datastore_services.Model):
     def id(self) -> str:
         """A unique id for this model instance."""
         return self.key.id()
-
+    @classmethod
+    def from_milliseconds_utc(timestamp_ms: float) -> datetime.datetime:
+        """Converts milliseconds since epoch to timezone-naive UTC datetime.
+        Creates a timezone-aware UTC datetime from milliseconds timestamp, then
+        strips timezone info to maintain compatibility with DateTimeProperty.
+        
+        Args:
+            timestamp_ms: float. Milliseconds since epoch.
+            
+        Returns:
+            datetime.datetime: UTC time as naive datetime.
+        """
+        return datetime.datetime.fromtimestamp(
+            timestamp_ms / 1000.0,
+            tz=timezone.utc
+        ).replace(tzinfo=None)
     class EntityNotFoundError(Exception):
         """Raised when no entity for a given id exists in the datastore."""
 
@@ -411,10 +435,10 @@ class BaseModel(datastore_services.Model):
         self._last_updated_timestamp_is_fresh = True
 
         if self.created_on is None:
-            self.created_on = datetime.datetime.utcnow()
+            self.created_on = get_current_datetime_utc()
 
         if update_last_updated_time or self.last_updated is None:
-            self.last_updated = datetime.datetime.utcnow()
+            self.last_updated = get_current_datetime_utc()
 
     @classmethod
     def update_timestamps_multi(
@@ -577,7 +601,6 @@ class BaseModel(datastore_services.Model):
             len(plus_one_query_models) == page_size + 1
         )
 
-
 class BaseHumanMaintainedModel(BaseModel):
     """A model that tracks the last time it was updated by a human.
 
@@ -602,7 +625,7 @@ class BaseHumanMaintainedModel(BaseModel):
 
     def put_for_human(self) -> None:
         """Stores the model instance on behalf of a human."""
-        self.last_updated_by_human = datetime.datetime.utcnow()
+        self.last_updated_by_human = get_current_datetime_utc()
         return super().put()
 
     def put_for_bot(self) -> None:
@@ -627,7 +650,7 @@ class BaseHumanMaintainedModel(BaseModel):
         Returns:
             list(future). A list of futures.
         """
-        now = datetime.datetime.utcnow()
+        now = get_current_datetime_utc()
         for instance in instances:
             instance.last_updated_by_human = now
         return super(BaseHumanMaintainedModel, cls).put_multi(instances)
